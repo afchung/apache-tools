@@ -9,7 +9,7 @@
 #    </Proxy>
 
 # You have to allow /balancer-manager
-#Like :
+# Like :
 # ProxyPass /balancer-manager !
 # <Location /balancer-manager>
 #   SetHandler balancer-manager
@@ -18,17 +18,10 @@
 #   Allow from 127.0.0.1
 # </Location>
 
-# Verify url="http....."
-
-#
-#HOW TO :
-#
-#./balancer-manager.py -l
-#./balancer-manager.py -w ajp://10.152.45.1:8001 -a enable
-
 import argparse
 import re
 import HTMLParser
+import json
 from urllib import urlencode
 from urllib2 import Request, urlopen
 
@@ -37,7 +30,7 @@ PARSER = argparse.ArgumentParser()
 PARSER.add_argument("-l", "--list", 
             help="List Worker member and status", action='store_true')
 PARSER.add_argument("-a", "--action", 
-            help="\"enable\" or \"disable\" the specified Worker", type=str)
+            help="\"add\", ""\"enable\", \"disable\", \"drain\", \"stop\", or \"rebalance\" the specified Worker", type=str)
 PARSER.add_argument("-w", "--worker",
             help="Worker name : example ajp://127.0.0.1:8001", type=str)
 ARGS = PARSER.parse_args()
@@ -51,7 +44,6 @@ url="http://127.0.0.1/balancer-manager"
 def balancer_status():
     req = Request(url, None, headers)
     f = urlopen(req)
-    #print f.read()
 
     class TableParser(HTMLParser.HTMLParser):
         def __init__(self):
@@ -83,24 +75,68 @@ def balancer_status():
     for v in p.datas[2:]:
         print template.format(Worker=v[0],Status=v[4],Elected=v[5])
 
+def find_balancer(html_file):
+    result = re.search("b=([^&]+)&nonce=([^\"]+)", html_file.read())
+    assert(result is not None)
+    
+    balancer = result.group(1)
+    nonce = result.group(2)
+        
+    return balancer, nonce
 
-def balancer_manage(action, worker):
-    #Read informations
+def manage_worker(action, worker):
+    # Read information
     req = Request(url, None, headers)
-    f = urlopen(req)
+    html_file = urlopen(req)
     
-    #Find balancer and nonce
-    result = re.search("b=([^&]+)&w="+worker+"&nonce=([^\"]+)", f.read())
-    if result is not None:
-        balancer = result.group(1)
-        nonce = result.group(2)
-    #Generate URL
-    params = urlencode({'b': balancer, 'w': worker, 'dw': action, 'nonce': nonce})
-    req = Request(url+"?%s" % params, None, headers)
+    # Find balancer and nonce
+    balancer, nonce = find_balancer(html_file)
+
+    worker_regex = re.search( \
+        "b=" + re.escape(balancer) + \
+        "&w=" + re.escape(worker) + \
+        "&nonce=" + re.escape(nonce), \
+        html_file.read())
+        
+    query_map = {'b': balancer, 'nonce': nonce} 
+    
+    # Generate parameters
+    if action == "add":
+        assert(worker_regex is None)
+        query_map['b_nwrker'] = worker
+        query_map['b_wyes'] = '1'
+    else:
+        query_map['w'] = worker
+        
+        if action == "disable":
+            query_map['w_status_D'] = '1'
+        elif action == "enable":
+            query_map['w_status_D'] = '0'
+        elif action == "drain":
+            query_map['w_status_N'] = '1'
+        elif action == "stop":
+            query_map['w_status_S'] = '1'
+        elif action.startswith('rebalance'):
+            action_split = action.split(':')
+            if len(action_split) < 2:
+                raise SystemExit('rebalance must be of format rebalance:load_factor')
+            
+            value = None
+            try:
+                value = int(action_split[1])
+                assert(0 < value < 100)
+            except Exception as ex:
+                raise SystemExit('rebalance must have an integer value of between 0 and 100')
+                
+            query_map['w_lf'] = str(value)
+            
+        else:
+            raise ValueError("action arg must be either disable or enable")
+
+    req = Request(url, json.dumps(query_map), headers)
     f = urlopen(req)
-    print "Action\n    Worker %s [%s]\n\nStatus" % (worker,action)
+    print "Action\n    Worker %s [%s]\n" % (worker,action)
     balancer_status()
-    
 
 
 if __name__ == "__main__":
@@ -108,5 +144,5 @@ if __name__ == "__main__":
     if ARGS.list :
         balancer_status()
     elif ARGS.action and ARGS.worker:
-        balancer_manage(ARGS.action,ARGS.worker)
+        manage_worker(ARGS.action, ARGS.worker)
     else : PARSER.print_help()
