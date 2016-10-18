@@ -21,7 +21,6 @@
 import argparse
 import re
 import HTMLParser
-import json
 from urllib import urlencode
 from urllib2 import Request, urlopen
 
@@ -133,7 +132,7 @@ def manage_worker(action, worker):
         else:
             raise ValueError("action arg must be either disable or enable")
 
-    req = Request(url, json.dumps(query_map), headers)
+    req = Request(url, urlencode(query_map), headers)
     f = urlopen(req)
     print "Action\n    Worker %s [%s]\n" % (worker,action)
     balancer_status()
