@@ -23,6 +23,7 @@ import re
 import HTMLParser
 from urllib import urlencode
 from urllib2 import Request, urlopen
+from bs4 import BeautifulSoup
 
 # Get args
 PARSER = argparse.ArgumentParser()
@@ -83,6 +84,17 @@ def find_balancer(html_file):
         
     return balancer, nonce
 
+def parse_lbmethod_options(options):
+    for option in options:
+        result = re.search("<option selected value=\"([^&]+?)\">", option.prettify())
+        if result is not None:
+            return result.group(1)
+    return None
+
+def custom_encode(query_map):
+    return '&'.join('%s=%s' % (key, value) for key, value in query_map.iteritems())
+
+
 def manage_worker(action, worker):
     # Read information
     req = Request(url, None, headers)
@@ -102,6 +114,20 @@ def manage_worker(action, worker):
     # Generate parameters
     if action == "add":
         assert(worker_regex is None)
+        req = Request(url + ("?%s" % urlencode({'b': balancer, 'nonce': nonce})))
+        balancer_file = urlopen(req).read()
+        balancer_file_soup = BeautifulSoup(balancer_file, 'html.parser')
+        lbmethod_options = balancer_file_soup.find(id='b_lbm').findAll('option', recursive=True)
+	lb_method = parse_lbmethod_options(lbmethod_options)
+        query_map['b_lbm'] = lb_method
+        timeout = balancer_file_soup.find(id='b_tmo')['value']
+        query_map['b_tmo'] = timeout
+        failover_attempts = balancer_file_soup.find(id='b_max')['value']
+        query_map['b_max'] = failover_attempts
+        disable_failover = balancer_file_soup.find(id='b_sforce')['value']
+        query_map['b_sforce'] = disable_failover
+        sticky_session = balancer_file_soup.find(id='b_ss')['value']
+        query_map['b_ss'] = sticky_session
         query_map['b_nwrker'] = worker
         query_map['b_wyes'] = '1'
     else:
@@ -132,7 +158,7 @@ def manage_worker(action, worker):
         else:
             raise ValueError("action arg must be either disable or enable")
 
-    req = Request(url, urlencode(query_map), headers)
+    req = Request(url, custom_encode(query_map), headers)
     f = urlopen(req)
     print "Action\n    Worker %s [%s]\n" % (worker,action)
     balancer_status()
