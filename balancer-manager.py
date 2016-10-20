@@ -22,6 +22,7 @@ import argparse
 import re
 import HTMLParser
 from urllib import urlencode
+import urllib2
 from urllib2 import Request, urlopen
 from bs4 import BeautifulSoup
 
@@ -40,6 +41,7 @@ ARGS = PARSER.parse_args()
 headers = {"Host": '127.0.0.1' }
 #ip to reach apache
 url="http://127.0.0.1/balancer-manager"
+
 
 def balancer_status():
     req = Request(url, None, headers)
@@ -75,6 +77,7 @@ def balancer_status():
     for v in p.datas[2:]:
         print template.format(Worker=v[0],Status=v[4],Elected=v[5])
 
+
 def find_balancer(html_file):
     result = re.search("b=([^&]+)&nonce=([^\"]+)", html_file.read())
     assert(result is not None)
@@ -84,6 +87,7 @@ def find_balancer(html_file):
         
     return balancer, nonce
 
+
 def parse_lbmethod_options(options):
     for option in options:
         result = re.search("<option selected value=\"([^&]+?)\">", option.prettify())
@@ -91,13 +95,11 @@ def parse_lbmethod_options(options):
             return result.group(1)
     return None
 
-def custom_encode(query_map):
-    return '&'.join('%s=%s' % (key, value) for key, value in query_map.iteritems())
-
 
 def manage_worker(action, worker):
     # Read information
     req = Request(url, None, headers)
+    print url
     html_file = urlopen(req)
     
     # Find balancer and nonce
@@ -158,13 +160,19 @@ def manage_worker(action, worker):
         else:
             raise ValueError("action arg must be either disable or enable")
 
-    req = Request(url, custom_encode(query_map), headers)
+    req = Request(url, urlencode(query_map), headers)
     f = urlopen(req)
     print "Action\n    Worker %s [%s]\n" % (worker,action)
     balancer_status()
 
 
 if __name__ == "__main__":
+    #disable proxy handler
+    proxy_handler = urllib2.ProxyHandler({})
+    opener = urllib2.build_opener(proxy_handler)
+    opener.addheaders.append(('Content-Type', 'application/x-www-form-urlencoded'))
+    urllib2.install_opener(opener)
+    
     #if ARGS.list is not None:
     if ARGS.list :
         balancer_status()
